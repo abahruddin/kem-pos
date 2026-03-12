@@ -2,37 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-
-// Tipe data untuk Produk
-type Product = {
-  id: number;
-  name: string;
-  price: number;
-  category: string;
-  color: string; // Warna placeholder untuk gambar
-};
-
-// Tipe data untuk Item Keranjang
-type CartItem = Product & {
-  cartId: string; // ID unik untuk setiap baris di keranjang (membedakan preferensi)
-  quantity: number;
-  notes?: string;
-  modifiers?: string[];
-};
-
-// Data Dummy Produk
-const PRODUCTS: Product[] = [
-  { id: 1, name: "Kopi Hitam", price: 15000, category: "Minuman", color: "bg-amber-800" },
-  { id: 2, name: "Latte", price: 20000, category: "Minuman", color: "bg-amber-200" },
-  { id: 3, name: "Cappuccino", price: 22000, category: "Minuman", color: "bg-amber-300" },
-  { id: 4, name: "Nasi Goreng", price: 25000, category: "Makanan", color: "bg-orange-500" },
-  { id: 5, name: "Mie Goreng", price: 25000, category: "Makanan", color: "bg-yellow-500" },
-  { id: 6, name: "Roti Bakar", price: 12000, category: "Snack", color: "bg-yellow-200" },
-  { id: 7, name: "Kentang Goreng", price: 15000, category: "Snack", color: "bg-yellow-100" },
-  { id: 8, name: "Es Teh Manis", price: 5000, category: "Minuman", color: "bg-amber-600" },
-];
-
-const CATEGORIES = ["Semua", "Minuman", "Makanan", "Snack"];
+import { CartItem, Member, Product } from "../types";
+import { CATEGORIES, INITIAL_MEMBERS, PRODUCTS } from "../constants";
+import { MenuDropdown } from "../components/MenuDropdown";
+import { ProductCard } from "../components/ProductCard";
+import { PaymentModal } from "../components/PaymentModal";
+import { Receipt } from "../components/Receipt";
 
 export default function POSPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -47,6 +22,27 @@ export default function POSPage() {
     type: "info",
     visible: false,
   });
+
+  const [tableNumber, setTableNumber] = useState("1");
+  const [openBills, setOpenBills] = useState<any[]>([]);
+  const [billId, setBillId] = useState<string | null>(null);
+  const [isOpenBillListModalOpen, setIsOpenBillListModalOpen] = useState(false);
+
+  // State untuk Payment Modal
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "qris" | null>(null);
+  const [cashAmount, setCashAmount] = useState("");
+  const [changeAmount, setChangeAmount] = useState(0);
+  const [receiptData, setReceiptData] = useState<any | null>(null);
+
+  // State untuk Member
+  const [members, setMembers] = useState<Member[]>(INITIAL_MEMBERS);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [isAddingMember, setIsAddingMember] = useState(false);
+  const [newMemberName, setNewMemberName] = useState("");
+  const [newMemberPhone, setNewMemberPhone] = useState("");
 
   // State untuk Modal & Kustomisasi
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -85,6 +81,32 @@ export default function POSPage() {
     };
   }, []);
 
+  // Effect untuk memuat member pending (offline) saat mount
+  useEffect(() => {
+    const pendingMembers = localStorage.getItem("pending_members");
+    if (pendingMembers) {
+      try {
+        const parsed = JSON.parse(pendingMembers);
+        // Gabungkan dengan member awal, hindari duplikasi ID
+        setMembers((prev) => [...prev, ...parsed.filter((m: Member) => !prev.some((pm) => pm.id === m.id))]);
+      } catch (e) {
+        console.error("Gagal memuat member pending", e);
+      }
+    }
+  }, []);
+
+  // Effect untuk memuat open bills dari local storage saat mount
+  useEffect(() => {
+    const savedBills = localStorage.getItem("open_bills");
+    if (savedBills) {
+      try {
+        setOpenBills(JSON.parse(savedBills));
+      } catch (e) {
+        console.error("Gagal memuat open bills", e);
+      }
+    }
+  }, []);
+
   // Effect untuk Auto-Sync saat kembali Online
   useEffect(() => {
     if (isOnline) {
@@ -99,6 +121,16 @@ export default function POSPage() {
           
           localStorage.removeItem("pending_orders");
           showToast(`Sinkronisasi: ${orders.length} transaksi offline berhasil dikirim.`, "info");
+        }
+      }
+
+      const pendingMembers = localStorage.getItem("pending_members");
+      if (pendingMembers) {
+        const membersData = JSON.parse(pendingMembers);
+        if (membersData.length > 0) {
+          console.log("🔄 KONEKSI PULIH: Sinkronisasi member...", membersData);
+          localStorage.removeItem("pending_members");
+          showToast(`Sinkronisasi: ${membersData.length} member baru berhasil dikirim.`, "info");
         }
       }
     }
@@ -132,6 +164,33 @@ export default function POSPage() {
     setSelectedProduct(null); // Tutup modal
   };
 
+  // Fungsi Tambah Member Baru
+  const handleAddMember = () => {
+    if (!newMemberName.trim() || !newMemberPhone.trim()) {
+      showToast("Nama dan Nomor HP wajib diisi", "error");
+      return;
+    }
+
+    const newMember: Member = {
+      id: crypto.randomUUID(),
+      name: newMemberName,
+      phone: newMemberPhone,
+    };
+
+    setMembers((prev) => [...prev, newMember]);
+
+    if (!isOnline) {
+      const pending = JSON.parse(localStorage.getItem("pending_members") || "[]");
+      pending.push(newMember);
+      localStorage.setItem("pending_members", JSON.stringify(pending));
+    }
+
+    setNewMemberName("");
+    setNewMemberPhone("");
+    setIsAddingMember(false);
+    showToast(isOnline ? "Member berhasil ditambahkan" : "Mode Offline: Member disimpan", isOnline ? "success" : "info");
+   };
+
   // Fungsi update quantity (tambah/kurang)
   const updateQuantity = (cartId: string, delta: number) => {
     setCart((prev) =>
@@ -159,16 +218,91 @@ export default function POSPage() {
     // Di sini bisa ditambahkan logika redirect ke halaman login
   };
 
-  // Fungsi Bayar (Simulasi Offline/Online)
+  // Fungsi Open Bill
+  const handleOpenBill = () => {
+    if (cart.length === 0) {
+      showToast("Keranjang kosong", "error");
+      return;
+    }
+
+    if (!selectedMember) {
+      showToast("Silakan pilih member terlebih dahulu", "info");
+      setIsMemberModalOpen(true);
+      return;
+    }
+
+    const newBill = {
+      id: billId || crypto.randomUUID(),
+      date: new Date().toISOString(),
+      tableNumber,
+      member: selectedMember,
+      items: cart,
+      total: totalAmount,
+      status: "open",
+    };
+
+    let updatedBills;
+    if (billId) {
+      // Update existing bill: ganti data lama dengan yang baru
+      updatedBills = openBills.map((b) => (b.id === billId ? newBill : b));
+    } else {
+      // Add new bill: tambahkan ke list
+      updatedBills = [...openBills, newBill];
+    }
+
+    setOpenBills(updatedBills);
+    localStorage.setItem("open_bills", JSON.stringify(updatedBills));
+
+    setCart([]);
+    setSelectedMember(null);
+    setBillId(null);
+    setTableNumber("1");
+    showToast(billId ? "Bill berhasil diperbarui" : "Bill berhasil dibuka (Open Bill)", "success");
+  };
+
+  // Fungsi Load Bill
+  const handleLoadBill = (bill: any) => {
+    setCart(bill.items);
+    setSelectedMember(bill.member);
+    setTableNumber(bill.tableNumber);
+    setBillId(bill.id);
+
+    // Remove from openBills
+    // const updatedBills = openBills.filter((b) => b.id !== bill.id);
+    // setOpenBills(updatedBills);
+    // localStorage.setItem("open_bills", JSON.stringify(updatedBills));
+
+    setIsOpenBillListModalOpen(false);
+    showToast("Bill berhasil dimuat", "success");
+  };
+
+  // Fungsi Buka Modal Pembayaran
   const handlePayment = () => {
+    if (cart.length === 0) {
+      showToast("Keranjang kosong", "error");
+      return;
+    }
+    setPaymentMethod(null);
+    setCashAmount("");
+    setChangeAmount(0);
+    setIsPaymentModalOpen(true);
+  };
+
+  // Fungsi Proses Pembayaran (Simulasi Offline/Online)
+  const processPayment = () => {
     if (cart.length === 0) return;
 
     const orderData = {
-      id: crypto.randomUUID(),
+      id: billId ?? crypto.randomUUID(),
       date: new Date().toISOString(),
       items: cart,
       total: totalAmount,
-      status: "pending", // Status awal
+      tableNumber,
+      member: selectedMember,
+      status: "paid",
+      paymentMethod,
+      cashAmount: paymentMethod === "cash" ? parseInt(cashAmount || "0", 10) : totalAmount,
+      changeAmount: paymentMethod === "cash" ? changeAmount : 0,
     };
 
     if (isOnline) {
@@ -188,7 +322,19 @@ export default function POSPage() {
       showToast("Mode Offline: Pesanan disimpan di perangkat.", "info");
     }
 
+    const updatedBills = openBills.filter((b) => b.id !== orderData.id);
+    setOpenBills(updatedBills);
+    localStorage.setItem("open_bills", JSON.stringify(updatedBills));
+
+    setReceiptData(orderData);
+
     setCart([]); // Kosongkan keranjang setelah proses
+    setSelectedMember(null);
+    setBillId(null);
+    setTableNumber("1");
+    setIsPaymentModalOpen(false);
+
+    setTimeout(() => window.print(), 500);
   };
 
   const totalAmount = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -205,36 +351,9 @@ export default function POSPage() {
       ? PRODUCTS
       : PRODUCTS.filter((product) => product.category === selectedCategory);
 
-  // Komponen Menu Dropdown (Titik Tiga)
-  const MenuDropdown = () => (
-    <div className="relative">
-      <button
-        onClick={() => setIsMenuOpen(!isMenuOpen)}
-        className="p-1.5 rounded-full hover:bg-gray-100 text-gray-600 transition-colors"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-        </svg>
-      </button>
-
-      {isMenuOpen && (
-        <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden origin-top-right">
-          <button
-            onClick={handleLogout}
-            className="w-full text-left px-4 py-3 text-red-600 hover:bg-red-50 font-medium flex items-center gap-2 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
-            </svg>
-            Keluar
-          </button>
-        </div>
-      )}
-    </div>
-  );
-
   return (
-    <div className="flex h-screen w-full bg-gray-100 text-gray-900 font-sans overflow-hidden">
+    <>
+    <div className="flex h-screen w-full bg-gray-100 text-gray-900 font-sans overflow-hidden print:hidden">
       {/* TOAST NOTIFICATION */}
       <div
         className={`fixed top-6 left-1/2 -translate-x-1/2 z-[100] transition-all duration-300 ${
@@ -275,7 +394,15 @@ export default function POSPage() {
           </button>
           <span className="font-bold text-lg">Pilih Produk</span>
           {/* Menu Button Mobile */}
-          <MenuDropdown />
+          <MenuDropdown
+            isOpen={isMenuOpen}
+            onToggle={() => setIsMenuOpen(!isMenuOpen)}
+            onOpenBillList={() => {
+              setIsOpenBillListModalOpen(true);
+              setIsMenuOpen(false);
+            }}
+            onLogout={handleLogout}
+          />
         </div>
 
         {/* Mobile Category Tabs */}
@@ -309,7 +436,15 @@ export default function POSPage() {
           <div className="p-5 border-b border-gray-200 flex items-center justify-between">
             <h1 className="text-xl font-bold text-gray-800">Menu</h1>
             {/* Menu Button Desktop */}
-            <MenuDropdown />
+            <MenuDropdown
+              isOpen={isMenuOpen}
+              onToggle={() => setIsMenuOpen(!isMenuOpen)}
+              onOpenBillList={() => {
+                setIsOpenBillListModalOpen(true);
+                setIsMenuOpen(false);
+              }}
+              onLogout={handleLogout}
+            />
           </div>
           <div className="px-6 py-4 border-b border-gray-200">
             <div className="flex overflow-x-auto p-1 bg-gray-100 rounded-xl">
@@ -343,31 +478,12 @@ export default function POSPage() {
             {filteredProducts.map((product) => {
               const qtyInCart = getProductQtyInCart(product.id);
               return (
-                <div
+                <ProductCard
                   key={product.id}
-                  onClick={() => handleProductClick(product)}
-                  className="bg-white rounded-xl shadow-sm hover:shadow-md cursor-pointer transition-all border border-gray-200 flex flex-col overflow-hidden group relative"
-                >
-                  {/* Badge Jumlah di Keranjang */}
-                  {qtyInCart > 0 && (
-                    <div className="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full shadow-md z-10">
-                      {qtyInCart}
-                    </div>
-                  )}
-
-                  {/* Placeholder Image */}
-                  <div className={`h-32 w-full flex items-center justify-center text-white font-bold text-2xl ${product.color}`}>
-                    {product.name.charAt(0)}
-                  </div>
-                  <div className="p-4 flex flex-col flex-1 justify-between">
-                    <h3 className="font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">
-                      {product.name}
-                    </h3>
-                    <p className="text-gray-600 font-medium mt-2">
-                      Rp {product.price.toLocaleString("id-ID")}
-                    </p>
-                  </div>
-                </div>
+                  product={product}
+                  qtyInCart={qtyInCart}
+                  onClick={handleProductClick}
+                />
               );
             })}
           </div>
@@ -385,23 +501,61 @@ export default function POSPage() {
         }`}
       >
         {/* Header Cart */}
-        <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-white">
-          <h2 className="text-xl font-bold text-gray-800">Pesanan</h2>
-          <div className="flex items-center gap-3">
-            {/* Indikator Offline */}
-            {!isOnline && (
-              <div className="px-3 py-1 bg-red-100 text-red-600 text-xs font-bold rounded-full flex items-center gap-1">
-                <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></div>
-                Offline
+        <div className="p-5 border-b border-gray-200 bg-white space-y-4">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-bold text-gray-800">Pesanan</h2>
+            <div className="flex items-center gap-3">
+              {/* Indikator Offline */}
+              {!isOnline && (
+                <div className="px-3 py-1 bg-red-100 text-red-600 text-xs font-bold rounded-full flex items-center gap-1">
+                  <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></div>
+                  Offline
+                </div>
+              )}
+              {/* Menu Button Mobile */}
+              <div className="md:hidden">
+                <MenuDropdown
+                  isOpen={isMenuOpen}
+                  onToggle={() => setIsMenuOpen(!isMenuOpen)}
+                  onOpenBillList={() => {
+                    setIsOpenBillListModalOpen(true);
+                    setIsMenuOpen(false);
+                  }}
+                  onLogout={handleLogout}
+                />
               </div>
-            )}
-            
-            <button className="text-blue-600 text-sm font-semibold bg-blue-50 px-4 py-2 rounded-full hover:bg-blue-100 transition-colors">
-              + Member
-            </button>
-            {/* Menu Button Mobile */}
-            <div className="md:hidden">
-              <MenuDropdown />
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <div className="w-20">
+              <label className="block text-xs font-bold text-gray-500 mb-1">Meja</label>
+              <input 
+                type="text" 
+                value={tableNumber}
+                onChange={(e) => setTableNumber(e.target.value)}
+                className="w-full bg-gray-100 border-none rounded-xl px-3 py-2 text-sm font-bold text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none text-center"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-gray-500 mb-1">Pelanggan</label>
+              <button 
+                onClick={() => setIsMemberModalOpen(true)}
+                className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-colors truncate flex items-center gap-2 ${
+                  selectedMember 
+                    ? "bg-blue-50 text-blue-700 border border-blue-100" 
+                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                }`}
+              >
+                {selectedMember ? (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                    {selectedMember.name}
+                  </>
+                ) : (
+                  "+ Pilih Member"
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -475,7 +629,10 @@ export default function POSPage() {
 
           {/* Action Buttons */}
           <div className="grid grid-cols-2 gap-3">
-            <button className="py-3 px-4 rounded-xl border-2 border-blue-600 text-blue-600 font-bold hover:bg-blue-50 transition-colors">
+            <button 
+              onClick={handleOpenBill}
+              className="py-3 px-4 rounded-xl border-2 border-blue-600 text-blue-600 font-bold hover:bg-blue-50 transition-colors"
+            >
               Open Bill
             </button>
             <button 
@@ -586,6 +743,146 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* MODAL MEMBER */}
+      {isMemberModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+              <h3 className="text-lg font-bold text-gray-800">{isAddingMember ? "Tambah Member Baru" : "Pilih Member"}</h3>
+              <button onClick={() => { setIsMemberModalOpen(false); setIsAddingMember(false); }} className="text-gray-400 hover:text-gray-600">
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1">
+             {isAddingMember ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Nama Lengkap</label>
+                    <input
+                      type="text"
+                      value={newMemberName}
+                      onChange={(e) => setNewMemberName(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="Masukkan nama member"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Nomor HP</label>
+                    <input
+                      type="tel"
+                      value={newMemberPhone}
+                      onChange={(e) => setNewMemberPhone(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="Contoh: 0812..."
+                    />
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <button onClick={() => setIsAddingMember(false)} className="flex-1 py-3 rounded-xl border border-gray-300 font-bold text-gray-700 hover:bg-gray-50">
+                      Batal
+                    </button>
+                    <button onClick={handleAddMember} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-lg shadow-blue-200">
+                      Simpan
+                   </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <input
+                      type="text"
+                      value={memberSearch}
+                      onChange={(e) => setMemberSearch(e.target.value)}
+                      placeholder="Cari nama atau nomor HP..."
+                      className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
+                      style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 24 24\' stroke=\'%239CA3AF\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z\' /%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: '12px center', backgroundSize: '20px' }}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {members.filter(m => m.name.toLowerCase().includes(memberSearch.toLowerCase()) || m.phone.includes(memberSearch)).map((member) => (
+                      <button
+                        key={member.id}
+                        onClick={() => { setSelectedMember(member); setIsMemberModalOpen(false); }}
+                        className={`w-full text-left p-3 rounded-xl border transition-all flex justify-between items-center ${
+                          selectedMember?.id === member.id ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500" : "border-gray-200 hover:bg-gray-50"
+                        }`}
+                      >
+                        <div>
+                          <div className="font-bold text-gray-800">{member.name}</div>
+                          <div className="text-sm text-gray-500">{member.phone}</div>
+                       </div>
+                        {selectedMember?.id === member.id && <span className="text-blue-600 font-bold">✓</span>}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button onClick={() => setIsAddingMember(true)} className="w-full mt-4 py-3 rounded-xl border-2 border-dashed border-blue-300 text-blue-600 font-bold hover:bg-blue-50 transition-colors">
+                    + Tambah Member Baru
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL OPEN BILL LIST */}
+      {isOpenBillListModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+              <h3 className="text-lg font-bold text-gray-800">Daftar Open Bill</h3>
+              <button onClick={() => setIsOpenBillListModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1 space-y-3">
+              {openBills.length === 0 ? (
+                <div className="text-center text-gray-500 py-8">Belum ada data Open Bill</div>
+              ) : (
+                openBills.map((bill) => (
+                  <button
+                    key={bill.id}
+                    onClick={() => handleLoadBill(bill)}
+                    className="w-full text-left p-4 rounded-xl border border-gray-200 hover:bg-blue-50 hover:border-blue-200 transition-all group"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <span className="font-bold text-gray-800 block">Meja {bill.tableNumber}</span>
+                        <span className="text-xs text-gray-500">{new Date(bill.date).toLocaleString('id-ID')}</span>
+                      </div>
+                      <span className="font-bold text-blue-600">Rp {bill.total.toLocaleString('id-ID')}</span>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {bill.member ? `Member: ${bill.member.name}` : "Non-Member"}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1 truncate">
+                      {bill.items.map((i: any) => i.name).join(", ")}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PAYMENT */}
+      <PaymentModal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        totalAmount={totalAmount}
+        onPayment={processPayment}
+        paymentMethod={paymentMethod}
+        setPaymentMethod={setPaymentMethod}
+        cashAmount={cashAmount}
+        setCashAmount={setCashAmount}
+        changeAmount={changeAmount}
+        setChangeAmount={setChangeAmount}
+      />
+
       {/* MODAL LOGOUT */}
       {showLogoutConfirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
@@ -612,5 +909,9 @@ export default function POSPage() {
         </div>
       )}
     </div>
+
+    {/* PRINT RECEIPT LAYOUT */}
+    <Receipt data={receiptData} />
+    </>
   );
 }
